@@ -1,0 +1,32 @@
+{
+  "name": "Telegram Schedule Bot",
+  "description": "Telegram bot for scheduling appointments",
+  "repository": "https://github.com/YOUR_USERNAME/YOUR_REPO_NAME",
+  "logo": "https://telegram.org/img/t_logo.png",
+  "keywords": ["telegram", "bot", "python", "scheduling"],
+  "env": {
+    "BOT_TOKEN": {
+      "description": "Telegram bot token from @BotFather",
+      "required": true
+    },
+    "ADMIN_IDS": {
+      "description": "Comma-separated list of admin user IDs",
+      "value": "949435625,770985476"
+    },
+    "ALLOWED_GROUP_ID": {
+      "description": "Group ID for user management",
+      "value": "-1003114498461"
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "free"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+}

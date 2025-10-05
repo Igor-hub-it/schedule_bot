@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: telegram-schedule-bot
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python start.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: ADMIN_IDS
+        value: "949435625,770985476"
+      - key: ALLOWED_GROUP_ID
+        value: "-1003114498461"
+      - key: DATABASE_PATH
+        value: "schedule_bot.db"
+      - key: ENABLE_NOTIFICATIONS
+        value: "True"
+      - key: NOTIFICATION_TIME_BEFORE
+        value: "60"
+      - key: DEFAULT_SLOT_DURATION
+        value: "60"
+      - key: MAX_SLOTS_PER_DAY
+        value: "10"
