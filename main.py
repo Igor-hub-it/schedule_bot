@@ -1900,7 +1900,7 @@ class ScheduleBot:
             periodic_thread.start()
             logger.info("Запущена периодическая проверка группы")
         
-        self.application.run_polling(drop_pending_updates=True)
+        self.application.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
     bot = ScheduleBot()
