@@ -21,9 +21,17 @@ class Database:
                     user_id INTEGER PRIMARY KEY,
                     username TEXT NOT NULL,
                     is_allowed BOOLEAN DEFAULT 1,
+                    role TEXT DEFAULT 'user',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # Добавляем поле role, если оно не существует (для существующих баз данных)
+            try:
+                cursor.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+            except sqlite3.OperationalError:
+                # Поле уже существует
+                pass
             
             # Таблица слотов времени
             cursor.execute("""

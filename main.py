@@ -55,6 +55,11 @@ class ScheduleBot:
     
     def is_admin(self, user_id: int) -> bool:
         """Проверить, является ли пользователь администратором"""
+        # Проверяем статических администраторов из config.py
+        if user_id in ADMIN_IDS:
+            return True
+        
+        # Проверяем динамических администраторов из базы данных
         return self.database.get_user_role(user_id) == 'admin'
     
     def get_user_keyboard(self, user_id: int) -> ReplyKeyboardMarkup:
