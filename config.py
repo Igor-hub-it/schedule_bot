@@ -7,10 +7,11 @@ BOT_TOKEN = "7528733857:AAEKkv_QhLaxXv1IFT3yvzDr8RNVuJnieuo"
 # ID администраторов (получите у @userinfobot)
 ADMIN_IDS = [
     949435625,  # Captain_Cobain
+    770985476, #Alex
 ]
 
 # ID группы, из которой разрешено добавлять пользователей (опционально)
-ALLOWED_GROUP_ID = -3114498461
+ALLOWED_GROUP_ID = -1003114498461
 
 # Настройки базы данных
 DATABASE_PATH = "schedule_bot.db"

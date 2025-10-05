@@ -59,16 +59,58 @@ class Database:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT OR IGNORE INTO users (user_id, username)
-                    VALUES (?, ?)
-                """, (user_id, username))
+                
+                # Проверяем, существует ли пользователь
+                cursor.execute("SELECT role FROM users WHERE user_id = ?", (user_id,))
+                existing_user = cursor.fetchone()
+                
+                if existing_user:
+                    # Обновляем только username, сохраняя существующую роль
+                    cursor.execute("""
+                        UPDATE users 
+                        SET username = ?
+                        WHERE user_id = ?
+                    """, (username, user_id))
+                else:
+                    # Создаем нового пользователя с ролью 'user' по умолчанию
+                    cursor.execute("""
+                        INSERT INTO users (user_id, username, role)
+                        VALUES (?, ?, 'user')
+                    """, (user_id, username))
+                
                 conn.commit()
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Ошибка при добавлении пользователя: {e}")
             return False
     
+    def free_user_bookings(self, user_id: int) -> int:
+        """Освободить все забронированные слоты пользователя"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Сначала подсчитываем количество слотов для освобождения
+                cursor.execute("""
+                    SELECT COUNT(*) FROM time_slots 
+                    WHERE booked_by = ? AND is_booked = 1
+                """, (user_id,))
+                count = cursor.fetchone()[0]
+                
+                # Освобождаем все забронированные слоты пользователя
+                cursor.execute("""
+                    UPDATE time_slots 
+                    SET is_booked = 0, booked_by = NULL 
+                    WHERE booked_by = ?
+                """, (user_id,))
+                
+                conn.commit()
+                logger.info(f"Освобождено {count} слотов пользователя {user_id}")
+                return count
+        except Exception as e:
+            logger.error(f"Ошибка при освобождении слотов пользователя: {e}")
+            return 0
+
     def remove_user(self, user_id: int) -> bool:
         """Удалить пользователя"""
         try:
@@ -103,6 +145,29 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при проверке пользователя: {e}")
             return False
+    
+    def user_exists(self, user_id: int) -> bool:
+        """Проверить, существует ли пользователь в базе"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+                result = cursor.fetchone()
+                return result is not None
+        except Exception as e:
+            logger.error(f"Ошибка при проверке существования пользователя: {e}")
+            return False
+
+    def get_all_users(self) -> list:
+        """Получить всех пользователей из базы"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT user_id, username FROM users")
+                return cursor.fetchall()
+        except Exception as e:
+            logger.error(f"Ошибка при получении списка пользователей: {e}")
+            return []
     
     def add_slot(self, datetime_obj: datetime, description: str) -> int:
         """Добавить слот времени"""
@@ -165,14 +230,14 @@ class Database:
             return None
     
     def get_available_slots(self) -> List[Dict]:
-        """Получить доступные слоты"""
+        """Получить доступные слоты (только те, на которые можно записаться за 24+ часов)"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT id, datetime, description, is_booked, booked_by
                     FROM time_slots 
-                    WHERE datetime > datetime('now') AND is_booked = 0
+                    WHERE datetime > datetime('now', '+24 hours') AND is_booked = 0
                     ORDER BY datetime
                 """)
                 results = cursor.fetchall()
@@ -219,8 +284,17 @@ class Database:
                     VALUES (?, ?)
                 """, (slot_id, user_id))
                 
+                # Обновляем username пользователя в таблице users (если изменился)
+                cursor.execute("""
+                    UPDATE users 
+                    SET username = (
+                        SELECT username FROM users WHERE user_id = ?
+                    )
+                    WHERE user_id = ?
+                """, (user_id, user_id))
+                
                 conn.commit()
-                return cursor.rowcount > 0
+                return True
         except Exception as e:
             logger.error(f"Ошибка при записи на слот: {e}")
             return False
@@ -291,30 +365,6 @@ class Database:
             logger.error(f"Ошибка при получении записей пользователя: {e}")
             return []
     
-    def get_all_users(self) -> List[Dict]:
-        """Получить всех пользователей"""
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT user_id, username, is_allowed, created_at
-                    FROM users
-                    ORDER BY created_at DESC
-                """)
-                results = cursor.fetchall()
-                
-                users = []
-                for result in results:
-                    users.append({
-                        'user_id': result[0],
-                        'username': result[1],
-                        'is_allowed': bool(result[2]),
-                        'created_at': result[3]
-                    })
-                return users
-        except Exception as e:
-            logger.error(f"Ошибка при получении пользователей: {e}")
-            return []
     
     def get_all_bookings(self) -> List[Dict]:
         """Получить все активные записи"""
@@ -453,6 +503,51 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка при удалении слота {slot_id}: {e}")
             return False, f"Ошибка при удалении слота: {e}"
+
+    def force_delete_slot(self, slot_id):
+        """Принудительно удалить слот с уведомлением пользователей"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Получаем информацию о слоте
+                cursor.execute("""
+                    SELECT datetime, description FROM time_slots WHERE id = ?
+                """, (slot_id,))
+                
+                slot_info = cursor.fetchone()
+                if not slot_info:
+                    return False, "Слот не найден", []
+                
+                slot_datetime, slot_description = slot_info
+                
+                # Получаем всех пользователей, забронировавших этот слот
+                cursor.execute("""
+                    SELECT b.user_id, u.username
+                    FROM bookings b
+                    JOIN users u ON b.user_id = u.user_id
+                    WHERE b.slot_id = ? AND b.cancelled_at IS NULL
+                """, (slot_id,))
+                
+                affected_users = cursor.fetchall()
+                
+                # Отменяем все активные записи на этот слот
+                cursor.execute("""
+                    UPDATE bookings 
+                    SET cancelled_at = CURRENT_TIMESTAMP
+                    WHERE slot_id = ? AND cancelled_at IS NULL
+                """, (slot_id,))
+                
+                # Удаляем слот
+                cursor.execute("DELETE FROM time_slots WHERE id = ?", (slot_id,))
+                conn.commit()
+                
+                logger.info(f"Слот {slot_id} принудительно удален, затронуто пользователей: {len(affected_users)}")
+                return True, "Слот принудительно удален", affected_users
+                
+        except Exception as e:
+            logger.error(f"Ошибка при принудительном удалении слота {slot_id}: {e}")
+            return False, f"Ошибка при удалении слота: {e}", []
     
     def get_bookings_by_slot(self, slot_id):
         """Получить все записи на определенный слот"""
@@ -460,17 +555,177 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 
+                # Получаем информацию о забронированном слоте из time_slots
                 cursor.execute("""
-                    SELECT b.id, b.user_id, b.slot_id, b.created_at, b.cancelled_at,
-                           u.username, u.username, u.username
-                    FROM bookings b
-                    LEFT JOIN users u ON b.user_id = u.user_id
-                    WHERE b.slot_id = ?
-                    ORDER BY b.created_at DESC
+                    SELECT ts.id, ts.datetime, ts.description, ts.is_booked, ts.booked_by,
+                           u.username
+                    FROM time_slots ts
+                    LEFT JOIN users u ON ts.booked_by = u.user_id
+                    WHERE ts.id = ? AND ts.is_booked = 1
                 """, (slot_id,))
                 
                 return cursor.fetchall()
         except Exception as e:
             logger.error(f"Ошибка при получении записей слота {slot_id}: {e}")
             return []
+    
+    def get_user_bookings_by_month(self, user_id: int, year: int, month: int) -> List[Dict]:
+        """Получить записи пользователя за определенный месяц"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT b.id, ts.datetime, ts.description
+                    FROM bookings b
+                    JOIN time_slots ts ON b.slot_id = ts.id
+                    WHERE b.user_id = ? AND b.cancelled_at IS NULL
+                    AND strftime('%Y', ts.datetime) = ? AND strftime('%m', ts.datetime) = ?
+                    ORDER BY ts.datetime
+                """, (user_id, str(year), f"{month:02d}"))
+                results = cursor.fetchall()
+                
+                bookings = []
+                for result in results:
+                    bookings.append({
+                        'id': result[0],
+                        'datetime': datetime.fromisoformat(result[1]),
+                        'description': result[2]
+                    })
+                
+                return bookings
+        except Exception as e:
+            logger.error(f"Ошибка при получении записей пользователя {user_id} за {month}.{year}: {e}")
+            return []
+    
+    def get_user_bookings_by_day(self, user_id: int, year: int, month: int, day: int) -> List[Dict]:
+        """Получить записи пользователя за определенный день"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT b.id, ts.datetime, ts.description
+                    FROM bookings b
+                    JOIN time_slots ts ON b.slot_id = ts.id
+                    WHERE b.user_id = ? AND b.cancelled_at IS NULL
+                    AND strftime('%Y', ts.datetime) = ? 
+                    AND strftime('%m', ts.datetime) = ?
+                    AND strftime('%d', ts.datetime) = ?
+                    ORDER BY ts.datetime
+                """, (user_id, str(year), f"{month:02d}", f"{day:02d}"))
+                results = cursor.fetchall()
+                
+                bookings = []
+                for result in results:
+                    bookings.append({
+                        'id': result[0],
+                        'datetime': datetime.fromisoformat(result[1]),
+                        'description': result[2]
+                    })
+                
+                return bookings
+        except Exception as e:
+            logger.error(f"Ошибка при получении записей пользователя {user_id} за {day}.{month}.{year}: {e}")
+            return []
+    
+    def get_available_slots_by_month(self, year: int, month: int) -> List[Dict]:
+        """Получить доступные слоты за определенный месяц (только те, на которые можно записаться за 24+ часов)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, datetime, description
+                    FROM time_slots
+                    WHERE strftime('%Y', datetime) = ? AND strftime('%m', datetime) = ?
+                    AND is_booked = 0
+                    AND datetime > datetime('now', '+24 hours')
+                    ORDER BY datetime
+                """, (str(year), f"{month:02d}"))
+                results = cursor.fetchall()
+                
+                slots = []
+                for result in results:
+                    slots.append({
+                        'id': result[0],
+                        'datetime': datetime.fromisoformat(result[1]),
+                        'description': result[2]
+                    })
+                
+                return slots
+        except Exception as e:
+            logger.error(f"Ошибка при получении доступных слотов за {month}.{year}: {e}")
+            return []
+    
+    def get_available_slots_by_day(self, year: int, month: int, day: int) -> List[Dict]:
+        """Получить доступные слоты за определенный день (только те, на которые можно записаться за 24+ часов)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT id, datetime, description
+                    FROM time_slots
+                    WHERE strftime('%Y', datetime) = ? 
+                    AND strftime('%m', datetime) = ?
+                    AND strftime('%d', datetime) = ?
+                    AND is_booked = 0
+                    AND datetime > datetime('now', '+24 hours')
+                    ORDER BY datetime
+                """, (str(year), f"{month:02d}", f"{day:02d}"))
+                results = cursor.fetchall()
+                
+                slots = []
+                for result in results:
+                    slots.append({
+                        'id': result[0],
+                        'datetime': datetime.fromisoformat(result[1]),
+                        'description': result[2]
+                    })
+                
+                return slots
+        except Exception as e:
+            logger.error(f"Ошибка при получении доступных слотов за {day}.{month}.{year}: {e}")
+            return []
+    
+    def get_user_role(self, user_id: int) -> str:
+        """Получить роль пользователя"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT role FROM users WHERE user_id = ?
+                """, (user_id,))
+                result = cursor.fetchone()
+                
+                if result:
+                    return result[0] or 'user'
+                else:
+                    return 'user'  # По умолчанию обычный пользователь
+        except Exception as e:
+            logger.error(f"Ошибка при получении роли пользователя {user_id}: {e}")
+            return 'user'
+    
+    def set_user_role(self, user_id: int, role: str) -> bool:
+        """Установить роль пользователя"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.cursor()
+                
+                # Проверяем, существует ли пользователь
+                cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (user_id,))
+                if not cursor.fetchone():
+                    # Если пользователя нет, добавляем его
+                    cursor.execute("""
+                        INSERT INTO users (user_id, username, is_allowed, role)
+                        VALUES (?, 'user', 1, ?)
+                    """, (user_id, role))
+                else:
+                    # Обновляем роль существующего пользователя
+                    cursor.execute("""
+                        UPDATE users SET role = ? WHERE user_id = ?
+                    """, (role, user_id))
+                
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка при установке роли пользователя {user_id}: {e}")
+            return False
 
