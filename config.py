@@ -2,27 +2,25 @@ import os
 from typing import List
 
 # Токен бота (получите у @BotFather)
-BOT_TOKEN = "7528733857:AAEKkv_QhLaxXv1IFT3yvzDr8RNVuJnieuo"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "7528733857:AAEKkv_QhLaxXv1IFT3yvzDr8RNVuJnieuo")
 
 # ID администраторов (получите у @userinfobot)
-ADMIN_IDS = [
-    949435625,  # Captain_Cobain
-    770985476, #Alex
-]
+ADMIN_IDS_STR = os.getenv("ADMIN_IDS", "949435625,770985476")
+ADMIN_IDS = [int(id.strip()) for id in ADMIN_IDS_STR.split(",") if id.strip()]
 
 # ID группы, из которой разрешено добавлять пользователей (опционально)
-ALLOWED_GROUP_ID = -1003114498461
+ALLOWED_GROUP_ID = int(os.getenv("ALLOWED_GROUP_ID", "-1003114498461"))
 
 # Настройки базы данных
-DATABASE_PATH = "schedule_bot.db"
+DATABASE_PATH = os.getenv("DATABASE_PATH", "schedule_bot.db")
 
 # Настройки уведомлений
-ENABLE_NOTIFICATIONS = True
-NOTIFICATION_TIME_BEFORE = 60  # Минуты до начала занятия
+ENABLE_NOTIFICATIONS = os.getenv("ENABLE_NOTIFICATIONS", "true").lower() == "true"
+NOTIFICATION_TIME_BEFORE = int(os.getenv("NOTIFICATION_TIME_BEFORE", "60"))  # Минуты до начала занятия
 
 # Настройки расписания
-DEFAULT_SLOT_DURATION = 60  # Длительность слота в минутах
-MAX_SLOTS_PER_DAY = 10  # Максимальное количество слотов в день
+DEFAULT_SLOT_DURATION = int(os.getenv("DEFAULT_SLOT_DURATION", "60"))  # Длительность слота в минутах
+MAX_SLOTS_PER_DAY = int(os.getenv("MAX_SLOTS_PER_DAY", "10"))  # Максимальное количество слотов в день
 
 # Текстовые сообщения
 MESSAGES = {
